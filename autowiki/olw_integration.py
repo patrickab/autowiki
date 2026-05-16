@@ -10,7 +10,7 @@ from obsidian_llm_wiki.state import StateDB
 log = logging.getLogger(__name__)
 
 
-def _patch_ollama_generate_for_cloud(client):
+def _patch_ollama_generate_for_cloud(client, max_output_tokens: int = 65536):
     og = type(client)
     if og.__name__ != "OllamaClient":
         return
@@ -19,7 +19,7 @@ def _patch_ollama_generate_for_cloud(client):
 
     def _patched_generate(prompt, model, system="", format=None, num_ctx=8192, num_predict=-1):
         if num_predict <= 0:
-            num_predict = num_ctx
+            num_predict = max_output_tokens
         return _orig_generate(prompt, model, system=system, format=format, num_ctx=num_ctx, num_predict=num_predict)
 
     client.generate = _patched_generate
@@ -29,6 +29,7 @@ def process_note(
     md_path: str | Path,
     vault_path: str | Path,
     overrides: dict | None = None,
+    max_output_tokens: int = 65536,
 ) -> list[Path]:
     md_path = Path(md_path)
     vault_path = Path(vault_path).resolve()
@@ -40,7 +41,7 @@ def process_note(
 
     config = OLWConfig.from_vault(vault_path, overrides=overrides or {})
     client = build_client(config)
-    _patch_ollama_generate_for_cloud(client)
+    _patch_ollama_generate_for_cloud(client, max_output_tokens)
     client.require_healthy()
     db = StateDB(config.state_db_path)
 

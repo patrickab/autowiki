@@ -8,10 +8,12 @@ models:
 ollama:
   fast_ctx: 500000
   heavy_ctx: 500000
+  max_output_tokens: 65536
 
 mineru:
   backend: "pipeline"
 
 pipeline:
   min_chars: 50
-  concept_draft_soft_cap: 16384
+  article_max_tokens: 16384
+  per_concept_tokens: 16384
