@@ -60,7 +60,7 @@ async def _extract_markdown(pdf_path: Path, stem: str, root_dir: Path, tmp_base:
 
 
 def _restructure_note(
-    stem: str, raw_md: str, root_dir: Path, models: dict[str, str], pdf_type: str, reasoning_effort: str | None
+    stem: str, raw_md: str, root_dir: Path, models: dict[str, str], pdf_type: str, reasoning_effort: str | None, llm_max_tokens: int = 16384
 ) -> str:
     """Reformat raw MinerU markdown into polished Obsidian notes via LLM. Cache result in done/mineru_polished/ and reuse on subsequent runs."""
     done_dir = root_dir / "done"
@@ -73,7 +73,7 @@ def _restructure_note(
 
     prompts_dir = root_dir / "prompts"
     note_prompt = (prompts_dir / "note_writing.md").read_text()
-    llm_kwargs = {"max_tokens": 16384}
+    llm_kwargs = {"max_tokens": llm_max_tokens}
     if reasoning_effort:
         llm_kwargs["reasoning_effort"] = reasoning_effort
 
@@ -130,7 +130,7 @@ async def process_pdf(pdf_path: Path, root_dir: Path, config: dict[str, Any]) ->
 
     try:
         raw_md = await _extract_markdown(pdf_path, stem, root_dir, tmp_base, min_chars, vault_path, backend=mineru_backend)
-        polished = _restructure_note(stem, raw_md, root_dir, models, pdf_type, reasoning_effort)
+        polished = _restructure_note(stem, raw_md, root_dir, models, pdf_type, reasoning_effort, article_max_tokens)
 
         polished_path = tmp_base / f"{stem}_polished.md"
         polished_path.write_text(polished)
