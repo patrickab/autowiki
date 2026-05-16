@@ -7,6 +7,8 @@ from obsidian_llm_wiki.pipeline.compile import approve_drafts, compile_concepts
 from obsidian_llm_wiki.pipeline.ingest import ingest_note
 from obsidian_llm_wiki.state import StateDB
 
+from .latex_sanitizer import sanitize_file
+
 log = logging.getLogger(__name__)
 
 
@@ -56,5 +58,7 @@ def process_note(
         return []
 
     published = approve_drafts(config, db, draft_paths)
+    for p in published:
+        sanitize_file(p)
     log.info("Published %d articles from: %s", len(published), dest.name)
     return published
