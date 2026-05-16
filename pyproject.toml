@@ -5,7 +5,7 @@ requires-python = ">=3.12"
 dependencies = [
     "llm-baseclient @ git+https://github.com/patrickab/llm-baseclient.git@main",
     "obsidian-llm-wiki>=0.8",
-    "mineru",
+    "mineru[all]",
     "pyyaml",
     "watchdog",
     "torch>=2.6",
