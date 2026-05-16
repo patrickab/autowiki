@@ -8,12 +8,28 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from obsidian_llm_wiki.config import default_wiki_toml
 
 from .pipeline import process_pdf
 from .watchdog import start_watchdog
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("autowiki")
+
+
+def _ensure_vault_config(root: Path, config: dict[str, Any]) -> None:
+    vault_path = Path(config["vault_path"])
+    if not vault_path.is_absolute():
+        vault_path = root / vault_path
+    vault_path.mkdir(parents=True, exist_ok=True)
+    toml_path = vault_path / "wiki.toml"
+    if toml_path.exists():
+        return
+    models = config.get("models", {})
+    fast = models.get("fast", "").removeprefix("ollama/")
+    heavy = models.get("heavy", "").removeprefix("ollama/")
+    toml_path.write_text(default_wiki_toml(fast_model=fast, heavy_model=heavy))
+    log.info("Wrote %s", toml_path)
 
 
 def _load_config(config_path: str | Path) -> dict[str, Any]:
@@ -63,6 +79,7 @@ def main() -> None:
     args = parser.parse_args()
     root = Path(__file__).parent.parent.resolve()
     config = _load_config(root / "config.yaml")
+    _ensure_vault_config(root, config)
 
     if args.command == "watch":
         inbox = root / "inbox"
