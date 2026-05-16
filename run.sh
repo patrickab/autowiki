@@ -1,2 +1,3 @@
 #!/bin/sh
-python -m run.something
+cd "$(dirname "$0")"
+.venv/bin/python -m autowiki "$@"

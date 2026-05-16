@@ -1,0 +1,13 @@
+vault_path: "./obsidian"
+
+models:
+  fast: "ollama/deepseek-v4-pro:cloud"
+  heavy: "ollama/deepseek-v4-pro:cloud"
+  reasoning_effort: "high"
+
+mineru:
+  backend: "pipeline"
+
+pipeline:
+  min_chars: 50
+  concept_draft_soft_cap: 8192

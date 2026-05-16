@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+*.jpg
+
+# Ignore contents of these dirs but not .gitkeep
+done/*
+inbox/*
+obsidian/*
+tmp/*
+
+!**/.gitkeep
