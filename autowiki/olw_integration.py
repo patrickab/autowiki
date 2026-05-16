@@ -25,7 +25,11 @@ def _patch_ollama_generate_for_cloud(client):
     client.generate = _patched_generate
 
 
-def process_note(md_path: str | Path, vault_path: str | Path) -> list[Path]:
+def process_note(
+    md_path: str | Path,
+    vault_path: str | Path,
+    overrides: dict | None = None,
+) -> list[Path]:
     md_path = Path(md_path)
     vault_path = Path(vault_path).resolve()
 
@@ -34,7 +38,7 @@ def process_note(md_path: str | Path, vault_path: str | Path) -> list[Path]:
     dest = raw_dir / md_path.name
     dest.write_text(md_path.read_text())
 
-    config = OLWConfig.from_vault(vault_path)
+    config = OLWConfig.from_vault(vault_path, overrides=overrides or {})
     client = build_client(config)
     _patch_ollama_generate_for_cloud(client)
     client.require_healthy()

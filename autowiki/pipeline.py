@@ -112,6 +112,16 @@ async def process_pdf(pdf_path: Path, root_dir: Path, config: dict[str, Any]) ->
     mineru_backend = config.get("mineru", {}).get("backend", "pipeline")
     reasoning_effort = models.get("reasoning_effort")
     min_chars = config.get("pipeline", {}).get("min_chars", 200)
+    concept_draft_soft_cap = config.get("pipeline", {}).get("concept_draft_soft_cap", 8192)
+    ollama_cfg = config.get("ollama", {})
+
+    olw_overrides: dict[str, Any] = {
+        "pipeline": {"concept_draft_soft_cap": concept_draft_soft_cap},
+        "ollama": {
+            "fast_ctx": ollama_cfg.get("fast_ctx", 16384),
+            "heavy_ctx": ollama_cfg.get("heavy_ctx", 32768),
+        },
+    }
 
     try:
         raw_md = await _extract_markdown(pdf_path, stem, root_dir, tmp_base, min_chars, vault_path, backend=mineru_backend)
@@ -121,7 +131,7 @@ async def process_pdf(pdf_path: Path, root_dir: Path, config: dict[str, Any]) ->
         polished_path.write_text(polished)
 
         log.info("[%s] Feeding to obsidian-llm-wiki...", stem)
-        published = process_note(polished_path, vault_path)
+        published = process_note(polished_path, vault_path, overrides=olw_overrides)
 
         shutil.move(str(pdf_path), str(orig_pdfs_dir / pdf_path.name))
 

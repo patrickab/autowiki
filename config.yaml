@@ -5,9 +5,13 @@ models:
   heavy: "ollama/deepseek-v4-pro:cloud"
   reasoning_effort: "high"
 
+ollama:
+  fast_ctx: 500000
+  heavy_ctx: 500000
+
 mineru:
   backend: "pipeline"
 
 pipeline:
   min_chars: 50
-  concept_draft_soft_cap: 8192
+  concept_draft_soft_cap: 16384
