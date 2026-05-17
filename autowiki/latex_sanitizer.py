@@ -4,7 +4,7 @@ from pathlib import Path
 
 log = logging.getLogger(__name__)
 
-_BARE_LATEX_RE = re.compile(r'^\\{1,2}([a-zA-Z{_])')
+_BARE_LATEX_RE = re.compile(r"^\\{1,2}([a-zA-Z{_])")
 
 
 def _frontmatter_end(lines: list[str]) -> int:

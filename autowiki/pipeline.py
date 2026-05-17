@@ -36,7 +36,9 @@ async def _extract_imgs(mineru_md_path: Path, vault_path: Path) -> None:
         log.info("Copied %d images to vault/images/", count)
 
 
-async def _extract_markdown(pdf_path: Path, stem: str, root_dir: Path, tmp_base: Path, min_chars: int, vault_path: Path, backend: str = "pipeline") -> str:
+async def _extract_markdown(
+    pdf_path: Path, stem: str, root_dir: Path, tmp_base: Path, min_chars: int, vault_path: Path, backend: str = "pipeline"
+) -> str:
     """Parse the PDF to markdown via MinerU. Cache result in done/mineru_raw/ and reuse on subsequent runs."""
     done_dir = root_dir / "done"
     raw_dir = done_dir / "mineru_raw"
@@ -60,7 +62,13 @@ async def _extract_markdown(pdf_path: Path, stem: str, root_dir: Path, tmp_base:
 
 
 def _restructure_note(
-    stem: str, raw_md: str, root_dir: Path, models: dict[str, str], pdf_type: str, reasoning_effort: str | None, llm_max_tokens: int = 16384
+    stem: str,
+    raw_md: str,
+    root_dir: Path,
+    models: dict[str, str],
+    pdf_type: str,
+    reasoning_effort: str | None,
+    llm_max_tokens: int = 16384,
 ) -> str:
     """Reformat raw MinerU markdown into polished Obsidian notes via LLM. Cache result in done/mineru_polished/ and reuse on subsequent runs."""
     done_dir = root_dir / "done"

@@ -41,18 +41,24 @@ def process_note(
     dest = raw_dir / md_path.name
     dest.write_text(md_path.read_text())
 
-    config = OLWConfig.from_vault(vault_path, overrides=overrides or {})
+    config = OLWConfig.from_vault(vault_path, **(overrides or {}))
     client = build_client(config)
     _patch_ollama_generate_for_cloud(client, max_output_tokens)
     client.require_healthy()
     db = StateDB(config.state_db_path)
 
     result = ingest_note(dest, config, client, db)
-    if result is None:
-        log.info("Note already ingested or failed: %s", dest.name)
-        return []
+    skip_compile = result is None and db.concepts_needing_compile() == []
 
-    draft_paths, _failed, _timings = compile_concepts(config, client, db)
+    if result is not None:
+        draft_paths, _failed, _timings = compile_concepts(config, client, db)
+    elif skip_compile:
+        log.info("Note already ingested and no pending concepts: %s", dest.name)
+        return []
+    else:
+        log.info("Note already ingested, running pending compiles: %s", dest.name)
+        draft_paths, _failed, _timings = compile_concepts(config, client, db)
+
     if not draft_paths:
         log.warning("No drafts generated for: %s", dest.name)
         return []
