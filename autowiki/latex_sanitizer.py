@@ -37,6 +37,18 @@ def sanitize_file(path: Path) -> int:
             continue
         if stripped.startswith("#"):
             continue
+
+        new_line = line
+        new_line = new_line.replace("\\(", "$")
+        new_line = new_line.replace("\\)", "$")
+        new_line = new_line.replace("\\[", "$$")
+        new_line = new_line.replace("\\]", "$$")
+
+        if new_line != line:
+            lines[i] = new_line
+            changed += 1
+            continue
+
         if not _BARE_LATEX_RE.match(stripped):
             continue
 
