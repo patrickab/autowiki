@@ -40,7 +40,7 @@ async def _extract_markdown(
     pdf_path: Path, stem: str, root_dir: Path, tmp_base: Path, min_chars: int, vault_path: Path, backend: str = "pipeline"
 ) -> str:
     """Parse the PDF to markdown via MinerU. Cache result in done/mineru_raw/ and reuse on subsequent runs."""
-    done_dir = root_dir / "done"
+    done_dir = vault_path / "done"
     raw_dir = done_dir / "mineru_raw"
     cached = raw_dir / f"{stem}.md"
 
@@ -65,13 +65,13 @@ def _restructure_note(
     stem: str,
     raw_md: str,
     root_dir: Path,
+    done_dir: Path,
     models: dict[str, str],
     pdf_type: str,
     reasoning_effort: str | None,
     llm_max_tokens: int = 16384,
 ) -> str:
     """Reformat raw MinerU markdown into polished Obsidian notes via LLM. Cache result in done/mineru_polished/ and reuse on subsequent runs."""
-    done_dir = root_dir / "done"
     polished_dir = done_dir / "mineru_polished"
     cached = polished_dir / f"{stem}.md"
 
@@ -88,9 +88,7 @@ def _restructure_note(
     if pdf_type == "exercise":
         log.info("[%s] Extracting learning goals...", stem)
         goal_prompt = (prompts_dir / "goal_extraction.md").read_text()
-        goals = _call_llm(goal_prompt, raw_md, models["fast"], **llm_kwargs)
-        combined = f"# Source Material\n\n{raw_md}\n\n# Learning Goals\n\n{goals}"
-        polished = _call_llm(note_prompt, combined, models["heavy"], **llm_kwargs)
+        polished = _call_llm(goal_prompt, raw_md, models["heavy"], **llm_kwargs)
     else:
         polished = _call_llm(note_prompt, raw_md, models["heavy"], **llm_kwargs)
 
@@ -104,7 +102,10 @@ async def process_pdf(pdf_path: Path, root_dir: Path, config: dict[str, Any]) ->
     inbox_rel = pdf_path.relative_to(root_dir / "inbox")
     pdf_type = "exercise" if "exercises" in str(inbox_rel) else "lecture"
 
-    done_dir = root_dir / "done"
+    vault_path = Path(config["vault_path"])
+    if not vault_path.is_absolute():
+        vault_path = root_dir / vault_path
+    done_dir = vault_path / "done"
     done_dir.mkdir(exist_ok=True)
     orig_pdfs_dir = done_dir / "original_pdfs"
     orig_pdfs_dir.mkdir(exist_ok=True)
@@ -115,7 +116,6 @@ async def process_pdf(pdf_path: Path, root_dir: Path, config: dict[str, Any]) ->
     tmp_base = root_dir / "tmp" / stem
     tmp_base.mkdir(parents=True, exist_ok=True)
 
-    vault_path = Path(config["vault_path"])
     models = config["models"]
     mineru_backend = config.get("mineru", {}).get("backend", "pipeline")
     reasoning_effort = models.get("reasoning_effort")
@@ -138,7 +138,7 @@ async def process_pdf(pdf_path: Path, root_dir: Path, config: dict[str, Any]) ->
 
     try:
         raw_md = await _extract_markdown(pdf_path, stem, root_dir, tmp_base, min_chars, vault_path, backend=mineru_backend)
-        polished = _restructure_note(stem, raw_md, root_dir, models, pdf_type, reasoning_effort, article_max_tokens)
+        polished = _restructure_note(stem, raw_md, root_dir, done_dir, models, pdf_type, reasoning_effort, article_max_tokens)
 
         polished_path = tmp_base / f"{stem}_polished.md"
         polished_path.write_text(polished)

@@ -11,7 +11,7 @@ ollama:
   max_output_tokens: 65536
 
 mineru:
-  backend: "pipeline"
+  backend: "auto"
 
 pipeline:
   min_chars: 50
