@@ -1,0 +1,3 @@
+[submodule "deeptutor/DeepTutor"]
+	path = deeptutor/DeepTutor
+	url = git@github.com:patrickab/DeepTutor.git

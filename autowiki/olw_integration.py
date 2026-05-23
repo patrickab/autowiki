@@ -1,11 +1,11 @@
 import logging
 from pathlib import Path
 
-from obsidian_llm_wiki.client_factory import build_client
-from obsidian_llm_wiki.config import Config as OLWConfig
-from obsidian_llm_wiki.pipeline.compile import approve_drafts, compile_concepts
-from obsidian_llm_wiki.pipeline.ingest import ingest_note
-from obsidian_llm_wiki.state import StateDB
+from synto.client_factory import build_client
+from synto.config import Config as SyntoConfig
+from synto.pipeline.compile import approve_drafts, compile_concepts
+from synto.pipeline.ingest import ingest_note
+from synto.state import StateDB
 
 from .latex_sanitizer import sanitize_file
 
@@ -41,7 +41,7 @@ def process_note(
     dest = raw_dir / md_path.name
     dest.write_text(md_path.read_text())
 
-    config = OLWConfig.from_vault(vault_path, **(overrides or {}))
+    config = SyntoConfig.from_vault(vault_path, **(overrides or {}))
     client = build_client(config)
     _patch_ollama_generate_for_cloud(client, max_output_tokens)
     client.require_healthy()
