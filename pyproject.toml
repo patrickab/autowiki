@@ -9,7 +9,7 @@ dependencies = [
     "pyyaml",
     "watchdog",
     "torch>=2.12.0",
-    "torchvision>=0.21",
+    "torchvision>=0.27.0",
 ]
 
 [build-system]
