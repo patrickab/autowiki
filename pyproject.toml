@@ -8,7 +8,7 @@ dependencies = [
     "mineru[all]",
     "pyyaml",
     "watchdog",
-    "torch>=2.6",
+    "torch>=2.12.0",
     "torchvision>=0.21",
 ]
 
