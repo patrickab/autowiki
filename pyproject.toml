@@ -4,7 +4,7 @@ version = "0.1.0"
 requires-python = ">=3.12"
 dependencies = [
     "llm-baseclient @ git+https://github.com/patrickab/llm-baseclient.git@main",
-    "synto>=0.2.2",
+    "synto>=0.4.0",
     "mineru[all]",
     "pyyaml",
     "watchdog",
