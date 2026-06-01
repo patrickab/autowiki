@@ -19,10 +19,10 @@ def _patch_ollama_generate_for_cloud(client, max_output_tokens: int = 65536):
 
     _orig_generate = client.generate
 
-    def _patched_generate(prompt, model, system="", format=None, num_ctx=8192, num_predict=-1):
+    def _patched_generate(prompt, model, system="", format=None, num_ctx=8192, num_predict=-1, **kwargs):
         if num_predict <= 0:
             num_predict = max_output_tokens
-        return _orig_generate(prompt, model, system=system, format=format, num_ctx=num_ctx, num_predict=num_predict)
+        return _orig_generate(prompt, model, system=system, format=format, num_ctx=num_ctx, num_predict=num_predict, **kwargs)
 
     client.generate = _patched_generate
 

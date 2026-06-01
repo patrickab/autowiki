@@ -17,7 +17,7 @@ process_inbox() {
   for pdf in $pdfs; do
     echo ""
     echo "=== $(date +%H:%M:%S) Processing: $pdf ==="
-    ./run.sh process "$pdf" --type "$type" || echo "WARNING: $pdf failed (continuing)"
+    .venv/bin/python -m autowiki process "$pdf" --type "$type" || echo "WARNING: $pdf failed (continuing)"
   done
 }
 
