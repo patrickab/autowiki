@@ -1,0 +1,10 @@
+vault_path: "./obsidian"
+
+preprocessing:
+  model: "ollama/deepseek-v4-pro:cloud"
+  reasoning_effort: "high"
+  max_output_tokens: 16384
+  min_chars: 200
+
+mineru:
+  backend: "auto"

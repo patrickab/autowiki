@@ -1,25 +1,53 @@
 # autowiki
 
-Zero-touch PDF → Obsidian wiki pipeline.
+Turn lecture and exercise PDFs into a source-grounded Obsidian wiki.
 
-**Pipeline:** PDF → MinerU (markdown) → LLM (restructure) → obsidian-llm-wiki (ingest + compile + approve)
+```text
+inbox PDF → MinerU/cache → preprocessing → obsidian/raw → Synto → obsidian/wiki
+```
 
-## Usage
+## Setup
 
-1. Drop PDFs into `inbox/lectures/` (or `inbox/exercises/`)
-2. `./run.sh inbox/lectures/my.pdf` — single PDF
-3. `./run-all.sh` — batch every PDF in `inbox/lectures/`
-4. Published articles appear in `obsidian/wiki/`
+```sh
+uv sync
+```
 
-## Config
+Configure PDF preprocessing in `config-preprocessing.yaml`. Configure Synto's
+provider, models, context windows, and article limits in `obsidian/synto.toml`.
+Final article style belongs in `obsidian/vault-schema.md`.
 
-`config.yaml` — models, MinerU backend, reasoning effort, soft caps.
-`prompts/` — note writing and goal extraction system prompts.
+## Ingest
+
+Drop PDFs into `inbox/lectures/` or `inbox/exercises/`, then run:
+
+```sh
+./ingest-pdf.sh
+```
+
+The command preprocesses every inbox PDF, writes canonical source notes to
+`obsidian/raw/`, archives completed PDFs under `obsidian/done/original_pdfs/`,
+and invokes Synto once for the batch. Pass one or more PDF paths to process only
+those files:
+
+```sh
+./ingest-pdf.sh inbox/lectures/my-lecture.pdf
+```
+
+Running the command with an empty inbox still runs Synto, allowing pending raw
+notes or failed compiles to resume.
 
 ## Caching
 
-`done/mineru_raw/` and `done/mineru_polished/` cache intermediate outputs. Delete a cached file to force re-run of that stage.
+- Local MinerU Markdown: `obsidian/done/mineru_raw/`
+- Local preprocessed Markdown: `obsidian/done/preprocessed/`
+- Shared PDFs: `~/Nextcloud/linux/Documents/PDFs/`
+- Shared MinerU Markdown and images: `~/Nextcloud/linux/Documents/Mineru/`
 
-## GPU
+The shared cache is best-effort. If Nextcloud is unavailable, ingestion continues
+using the local pipeline.
 
-Auto-detects CUDA via `torch.cuda.is_available()` for `hybrid-auto-engine` MinerU backend. Falls back to `pipeline` (CPU) otherwise.
+## Output
+
+- Source notes: `obsidian/raw/`
+- Published articles: `obsidian/wiki/`
+- Extracted images: `obsidian/images/`

@@ -9,3 +9,4 @@ Rules:
 - For each concept, include a one-sentence justification explaining why it is relevant to the exercises
 - Output structured markdown with concept names as ## headings and justifications as paragraph text
 - Include relevant formulas, definitions, or notation where appropriate for reference
+- Math in LaTeX (`$...$` inline, `$$...$$` block).

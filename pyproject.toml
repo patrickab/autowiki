@@ -7,9 +7,8 @@ dependencies = [
     "synto>=0.7.0",
     "mineru[all]",
     "pyyaml",
-    "watchdog",
-    "torch>=2.13.0",
-    "torchvision>=0.28.0",
+    "torch>=2.6,<2.12",
+    "torchvision>=0.21,<0.27",
 ]
 
 [build-system]

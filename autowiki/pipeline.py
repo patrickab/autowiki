@@ -4,166 +4,200 @@ from pathlib import Path
 from typing import Any
 
 from llm_baseclient.client import LLMClient
+import yaml
 
 from . import cloud_cache
 from .mineru_wrapper import parse_pdf as mineru_parse_pdf
-from .olw_integration import process_note
 
 log = logging.getLogger(__name__)
 
 client = LLMClient()
 
 
-def _call_llm(system_prompt: str, user_content: str, model: str, max_tokens: int, reasoning_effort: str | None = None) -> str:
-    kwargs = {"max_tokens": max_tokens}
+def _call_llm(
+    system_prompt: str,
+    user_content: str,
+    model: str,
+    max_tokens: int,
+    reasoning_effort: str | None = None,
+) -> str:
+    kwargs: dict[str, Any] = {"max_tokens": max_tokens}
     if reasoning_effort:
         kwargs["reasoning_effort"] = reasoning_effort
-    resp = client.api_query(model=model, user_msg=user_content, system_prompt=system_prompt, **kwargs)
-    return resp.choices[0].message.content
+    response = client.api_query(
+        model=model,
+        user_msg=user_content,
+        system_prompt=system_prompt,
+        **kwargs,
+    )
+    return response.choices[0].message.content
 
 
-async def _extract_imgs(mineru_md_path: Path, vault_path: Path) -> None:
+async def _extract_images(mineru_md_path: Path, vault_path: Path) -> None:
     images_dir = mineru_md_path.parent / "images"
     if not images_dir.is_dir():
         return
     vault_images = vault_path / "images"
     vault_images.mkdir(parents=True, exist_ok=True)
-    count = 0
-    for img in images_dir.iterdir():
-        if img.is_file() and not (vault_images / img.name).exists():
-            shutil.copy2(str(img), str(vault_images / img.name))
-            count += 1
-    if count:
-        log.info("Copied %d images to vault/images/", count)
+    copied = 0
+    for image in images_dir.iterdir():
+        if image.is_file() and not (vault_images / image.name).exists():
+            shutil.copy2(image, vault_images / image.name)
+            copied += 1
+    if copied:
+        log.info("Copied %d images to vault/images/", copied)
 
 
 async def _extract_markdown(
-    pdf_path: Path, stem: str, root_dir: Path, tmp_base: Path, min_chars: int, vault_path: Path, backend: str = "pipeline"
+    pdf_path: Path,
+    stem: str,
+    tmp_dir: Path,
+    min_chars: int,
+    vault_path: Path,
+    backend: str,
 ) -> str:
-    """Parse the PDF to markdown via MinerU. Cache result in done/mineru_raw/ and reuse on subsequent runs."""
-    done_dir = vault_path / "done"
-    raw_dir = done_dir / "mineru_raw"
+    raw_dir = vault_path / "done" / "mineru_raw"
     cached = raw_dir / f"{stem}.md"
 
+    # The shared cache owns both the source PDF and MinerU's reusable Markdown.
+    cloud_cache.drop_pdf_for_mineru(pdf_path)
+
     if cached.exists():
-        raw_md = cached.read_text()
-        log.info("[%s] Reusing cached MinerU output (%d chars)", stem, len(raw_md))
+        raw_markdown = cached.read_text(encoding="utf-8")
+        log.info("[%s] Reusing local MinerU output (%d chars)", stem, len(raw_markdown))
     else:
-        cloud_md = cloud_cache.fetch_cached_markdown(stem)
-        if cloud_md is not None:
-            log.info("[%s] Reusing shared MinerU cache (gigachad-bot)", stem)
-            raw_md = cloud_md
+        raw_markdown = cloud_cache.fetch_cached_markdown(stem)
+        if raw_markdown is not None:
+            log.info("[%s] Reusing shared MinerU cache", stem)
             raw_dir.mkdir(parents=True, exist_ok=True)
-            cached.write_text(raw_md)
-            vault_images = vault_path / "images"
-            cloud_cache.fetch_cached_images(stem, vault_images)
+            cached.write_text(raw_markdown, encoding="utf-8")
+            cloud_cache.fetch_cached_images(stem, vault_path / "images")
         else:
-            cloud_cache.drop_pdf_for_mineru(pdf_path)
             log.info("[%s] MinerU parsing...", stem)
-            mineru_md_path = await mineru_parse_pdf(pdf_path, tmp_base, backend=backend)
-            raw_md = mineru_md_path.read_text()
+            mineru_md_path = await mineru_parse_pdf(pdf_path, tmp_dir, backend=backend)
+            raw_markdown = mineru_md_path.read_text(encoding="utf-8")
             raw_dir.mkdir(parents=True, exist_ok=True)
-            cached.write_text(raw_md)
-            await _extract_imgs(mineru_md_path, vault_path)
+            cached.write_text(raw_markdown, encoding="utf-8")
+            await _extract_images(mineru_md_path, vault_path)
             cloud_cache.publish_to_cache(stem, mineru_md_path)
 
-    if len(raw_md.strip()) < min_chars:
-        raise RuntimeError(f"MinerU output too short ({len(raw_md)} chars < {min_chars})")
+    if len(raw_markdown.strip()) < min_chars:
+        raise RuntimeError(f"MinerU output too short ({len(raw_markdown)} chars < {min_chars})")
+    return raw_markdown
 
-    return raw_md
 
-
-def _restructure_note(
+def _preprocess_markdown(
     stem: str,
-    raw_md: str,
+    raw_markdown: str,
     root_dir: Path,
-    done_dir: Path,
-    models: dict[str, str],
+    vault_path: Path,
     pdf_type: str,
-    reasoning_effort: str | None,
-    llm_max_tokens: int = 16384,
+    config: dict[str, Any],
 ) -> str:
-    """Reformat raw MinerU markdown into polished Obsidian notes via LLM. Cache result in done/mineru_polished/ and reuse on subsequent runs."""
-    polished_dir = done_dir / "mineru_polished"
-    cached = polished_dir / f"{stem}.md"
-
+    cached = vault_path / "done" / "preprocessed" / f"{stem}.md"
     if cached.exists():
-        log.info("[%s] Reusing cached polished output", stem)
-        return cached.read_text()
+        log.info("[%s] Reusing preprocessed Markdown", stem)
+        return cached.read_text(encoding="utf-8")
 
-    prompts_dir = root_dir / "prompts"
-    note_prompt = (prompts_dir / "note_writing.md").read_text()
-    llm_kwargs = {"max_tokens": llm_max_tokens}
-    if reasoning_effort:
-        llm_kwargs["reasoning_effort"] = reasoning_effort
+    prompt_name = "goal_extraction.md" if pdf_type == "exercise" else "note_writing.md"
+    prompt = (root_dir / "prompts" / prompt_name).read_text(encoding="utf-8")
+    preprocessing = config["preprocessing"]
+    markdown = _call_llm(
+        prompt,
+        raw_markdown,
+        preprocessing["model"],
+        preprocessing.get("max_output_tokens", 16384),
+        preprocessing.get("reasoning_effort"),
+    )
 
-    if pdf_type == "exercise":
-        log.info("[%s] Extracting learning goals...", stem)
-        goal_prompt = (prompts_dir / "goal_extraction.md").read_text()
-        polished = _call_llm(goal_prompt, raw_md, models["heavy"], **llm_kwargs)
-    else:
-        polished = _call_llm(note_prompt, raw_md, models["heavy"], **llm_kwargs)
-
-    polished_dir.mkdir(parents=True, exist_ok=True)
-    cached.write_text(polished)
-    return polished
+    cached.parent.mkdir(parents=True, exist_ok=True)
+    cached.write_text(markdown, encoding="utf-8")
+    return markdown
 
 
-async def process_pdf(pdf_path: Path, root_dir: Path, config: dict[str, Any]) -> list[Path]:
+def _write_synto_source(
+    vault_path: Path,
+    stem: str,
+    pdf_name: str,
+    pdf_type: str,
+    markdown: str,
+) -> Path:
+    metadata = {
+        "title": stem,
+        "source_type": "textbook",
+        "document_kind": pdf_type,
+        "source_file": pdf_name,
+    }
+    frontmatter = yaml.safe_dump(metadata, sort_keys=False, allow_unicode=True).strip()
+    raw_dir = vault_path / "raw"
+    raw_dir.mkdir(parents=True, exist_ok=True)
+    destination = raw_dir / f"{stem}.md"
+    destination.write_text(
+        f"---\n{frontmatter}\n---\n\n{markdown.strip()}\n",
+        encoding="utf-8",
+    )
+    return destination
+
+
+def _pdf_type(pdf_path: Path) -> str:
+    return "exercise" if pdf_path.parent.name.lower() == "exercises" else "lecture"
+
+
+async def preprocess_pdf(
+    pdf_path: Path,
+    root_dir: Path,
+    config: dict[str, Any],
+) -> Path | None:
+    if not pdf_path.is_file() or pdf_path.suffix.lower() != ".pdf":
+        raise ValueError(f"Not a PDF file: {pdf_path}")
+
     stem = pdf_path.stem
-    inbox_rel = pdf_path.relative_to(root_dir / "inbox")
-    pdf_type = "exercise" if "exercises" in str(inbox_rel) else "lecture"
-
     vault_path = Path(config["vault_path"])
     if not vault_path.is_absolute():
         vault_path = root_dir / vault_path
-    done_dir = vault_path / "done"
-    done_dir.mkdir(exist_ok=True)
-    orig_pdfs_dir = done_dir / "original_pdfs"
-    orig_pdfs_dir.mkdir(exist_ok=True)
-    if (orig_pdfs_dir / pdf_path.name).exists():
-        log.info("[%s] Already in done/original_pdfs, skipping", stem)
-        return []
+    vault_path.mkdir(parents=True, exist_ok=True)
 
-    tmp_base = root_dir / "tmp" / stem
-    tmp_base.mkdir(parents=True, exist_ok=True)
+    archive_dir = vault_path / "done" / "original_pdfs"
+    archive_dir.mkdir(parents=True, exist_ok=True)
+    archived_pdf = archive_dir / pdf_path.name
+    if archived_pdf.exists():
+        log.info("[%s] Already archived; skipping preprocessing", stem)
+        return None
 
-    models = config["models"]
-    mineru_backend = config.get("mineru", {}).get("backend", "pipeline")
-    reasoning_effort = models.get("reasoning_effort")
-    min_chars = config.get("pipeline", {}).get("min_chars", 200)
-    article_max_tokens = config.get("pipeline", {}).get("article_max_tokens", 16384)
-    concept_draft_soft_cap = config.get("pipeline", {}).get("per_concept_tokens", 8192)
-    ollama_cfg = config.get("ollama", {})
-
-    olw_overrides: dict[str, Any] = {
-        "pipeline": {
-            "article_max_tokens": article_max_tokens,
-            "concept_draft_soft_cap": concept_draft_soft_cap,
-        },
-        "ollama": {
-            "fast_ctx": ollama_cfg.get("fast_ctx", 16384),
-            "heavy_ctx": ollama_cfg.get("heavy_ctx", 32768),
-        },
-    }
-    max_output_tokens = ollama_cfg.get("max_output_tokens", 65536)
+    tmp_dir = root_dir / "tmp" / stem
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+    preprocessing = config["preprocessing"]
+    mineru = config.get("mineru", {})
+    pdf_type = _pdf_type(pdf_path)
 
     try:
-        raw_md = await _extract_markdown(pdf_path, stem, root_dir, tmp_base, min_chars, vault_path, backend=mineru_backend)
-        polished = _restructure_note(stem, raw_md, root_dir, done_dir, models, pdf_type, reasoning_effort, article_max_tokens)
-
-        polished_path = tmp_base / f"{stem}_polished.md"
-        polished_path.write_text(polished)
-
-        log.info("[%s] Feeding to obsidian-llm-wiki...", stem)
-        published = process_note(polished_path, vault_path, overrides=olw_overrides, max_output_tokens=max_output_tokens)
-
-        shutil.move(str(pdf_path), str(orig_pdfs_dir / pdf_path.name))
-
-        shutil.rmtree(tmp_base, ignore_errors=True)
-        log.info("[%s] Done — %d articles published", stem, len(published))
-        return published
-
+        raw_markdown = await _extract_markdown(
+            pdf_path,
+            stem,
+            tmp_dir,
+            preprocessing.get("min_chars", 200),
+            vault_path,
+            mineru.get("backend", "auto"),
+        )
+        markdown = _preprocess_markdown(
+            stem,
+            raw_markdown,
+            root_dir,
+            vault_path,
+            pdf_type,
+            config,
+        )
+        source_path = _write_synto_source(
+            vault_path,
+            stem,
+            pdf_path.name,
+            pdf_type,
+            markdown,
+        )
+        shutil.move(str(pdf_path), archived_pdf)
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+        log.info("[%s] Prepared %s", stem, source_path)
+        return source_path
     except Exception:
-        log.exception("[%s] Pipeline failed", stem)
+        log.exception("[%s] Preprocessing failed", stem)
         raise

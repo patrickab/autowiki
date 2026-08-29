@@ -9,3 +9,5 @@ obsidian/*
 tmp/*
 
 !**/.gitkeep
+!obsidian/synto.toml
+!obsidian/vault-schema.md

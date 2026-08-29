@@ -1,0 +1,28 @@
+[providers.default]
+name = "ollama"
+url = "http://localhost:11434"
+timeout = 600
+
+[models.fast]
+provider = "default"
+model = "deepseek-v4-pro:cloud"
+ctx = 500000
+
+# Ollama cloud models require a finite prediction budget for structured ingest.
+[models.fast.options]
+num_predict = 8192
+
+[models.heavy]
+provider = "default"
+model = "deepseek-v4-pro:cloud"
+ctx = 500000
+
+[pipeline]
+auto_approve = true
+auto_commit = false
+auto_maintain = false
+max_concepts_per_source = 8
+article_max_tokens = 16384
+concept_draft_soft_cap = 16384
+inline_source_citations = true
+graph_quality_checks = true
