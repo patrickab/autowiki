@@ -21,7 +21,7 @@ def _load_config(path: Path) -> dict[str, Any]:
 
 def _inbox_pdfs(root: Path) -> list[Path]:
     inbox = root / "inbox"
-    directories = [inbox / "lectures", inbox / "exercises"]
+    directories = [inbox / "lectures", inbox / "exercises", inbox / "papers"]
     for directory in directories:
         directory.mkdir(parents=True, exist_ok=True)
     return sorted(
@@ -35,7 +35,7 @@ def main() -> None:
         "pdfs",
         nargs="*",
         type=Path,
-        help="Optional inbox PDFs; defaults to every PDF in inbox/lectures and inbox/exercises",
+        help="Optional inbox PDFs; defaults to every PDF in inbox/{lectures,exercises,papers}",
     )
     args = parser.parse_args()
 

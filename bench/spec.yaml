@@ -1,0 +1,22 @@
+sample_pdf: adl4p-exercise-07-GNNs.pdf
+pdf_kind: exercise            # exercise | paper | lecture -> selects preprocessing prompt
+
+# Each model is stamped into BOTH config surfaces (preprocessing + synto.toml).
+# Provider keys are read from the environment (e.g. DEEPSEEK_API_KEY) by the
+# underlying clients; ollama needs none.
+models:
+  - id: ollama-deepseek
+    provider: ollama
+    model: deepseek-v4-pro:cloud
+    url: http://localhost:11434
+  # - id: deepseek-chat
+  #   provider: deepseek
+  #   model: deepseek-chat
+  #   url: https://api.deepseek.com
+  # - id: or-claude
+  #   provider: openrouter
+  #   model: anthropic/claude-3.5-sonnet
+  #   url: https://openrouter.ai/api/v1
+
+judge:
+  model: ollama/deepseek-v4-pro:cloud

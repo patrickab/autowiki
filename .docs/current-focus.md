@@ -12,6 +12,13 @@
   `source_type: textbook`, while `document_kind` preserves their original type.
 - Preprocessing is explicitly source-faithful and leaves enrichment and
   wikilinking to Synto.
+- Lecture preprocessing now condenses for study speed: slide-administration
+  noise and incremental-reveal duplicates are dropped, and notes are structured
+  under few concept-named sections so the note itself surfaces what matters.
+- A papers variant exists: `inbox/papers/` routes to `prompts/paper_writing.md`
+  (`document_kind: paper`), which drops publication noise, merges
+  abstract/intro/conclusion redundancy, and trims reproducibility detail while
+  keeping method, results, and ablation conclusions.
 
 ## Open questions
 

@@ -10,6 +10,7 @@ autowiki/
 
 prompts/
   note_writing.md      source-faithful lecture preprocessing
+  paper_writing.md     source-faithful scientific-paper preprocessing
   goal_extraction.md   exercise prerequisite extraction
 
 tests/
@@ -23,7 +24,7 @@ obsidian/vault-schema.md   final wiki article conventions
 
 ## Runtime directories
 
-- `inbox/{lectures,exercises}/` receives PDFs.
+- `inbox/{lectures,exercises,papers}/` receives PDFs.
 - `tmp/<stem>/` holds MinerU scratch data after failures and is removed on success.
 - `obsidian/raw/` contains canonical Synto source notes.
 - `obsidian/wiki/` contains Synto output.

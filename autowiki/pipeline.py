@@ -99,7 +99,8 @@ def _preprocess_markdown(
         log.info("[%s] Reusing preprocessed Markdown", stem)
         return cached.read_text(encoding="utf-8")
 
-    prompt_name = "goal_extraction.md" if pdf_type == "exercise" else "note_writing.md"
+    prompt_names = {"exercise": "goal_extraction.md", "paper": "paper_writing.md"}
+    prompt_name = prompt_names.get(pdf_type, "note_writing.md")
     prompt = (root_dir / "prompts" / prompt_name).read_text(encoding="utf-8")
     preprocessing = config["preprocessing"]
     markdown = _call_llm(
@@ -140,7 +141,12 @@ def _write_synto_source(
 
 
 def _pdf_type(pdf_path: Path) -> str:
-    return "exercise" if pdf_path.parent.name.lower() == "exercises" else "lecture"
+    parent = pdf_path.parent.name.lower()
+    if parent == "exercises":
+        return "exercise"
+    if parent == "papers":
+        return "paper"
+    return "lecture"
 
 
 async def preprocess_pdf(

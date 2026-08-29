@@ -8,7 +8,7 @@ Obsidian vault.
 ## Data flow
 
 ```text
-inbox/{lectures,exercises}/*.pdf
+inbox/{lectures,exercises,papers}/*.pdf
   → shared PDF/MinerU cache lookup
   → MinerU extraction when uncached
   → source-faithful LLM preprocessing
@@ -18,7 +18,7 @@ inbox/{lectures,exercises}/*.pdf
 ```
 
 `ingest-pdf.sh` is the single entry point. With no arguments it processes every
-PDF in both inbox directories; explicit PDF paths restrict the batch. Synto runs
+PDF in all inbox directories; explicit PDF paths restrict the batch. Synto runs
 once after all PDFs have been prepared, including when the inbox is empty so
 pending raw notes can resume.
 
