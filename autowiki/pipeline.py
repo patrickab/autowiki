@@ -30,7 +30,12 @@ def _call_llm(
         system_prompt=system_prompt,
         **kwargs,
     )
-    return response.choices[0].message.content
+    choice = response.choices[0]
+    content = choice.message.content
+    if content is None:
+        # Reasoning models can burn the whole token budget thinking and emit no answer.
+        raise RuntimeError(f"{model} returned no content (finish_reason={choice.finish_reason}); raise max_tokens")
+    return content
 
 
 async def _extract_images(mineru_md_path: Path, vault_path: Path) -> None:

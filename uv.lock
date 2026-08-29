@@ -349,7 +349,7 @@ requires-dist = [
     { name = "llm-baseclient", git = "https://github.com/patrickab/llm-baseclient.git?rev=main" },
     { name = "mineru", extras = ["all"] },
     { name = "pyyaml" },
-    { name = "synto", specifier = ">=0.7.0" },
+    { name = "synto", git = "https://github.com/patrickab/synto.git?rev=fix%2Flatex-in-article-bodies" },
     { name = "torch", specifier = ">=2.6,<2.12" },
     { name = "torchvision", specifier = ">=0.21,<0.27" },
 ]
@@ -4996,7 +4996,7 @@ wheels = [
 [[package]]
 name = "synto"
 version = "0.7.0"
-source = { registry = "https://pypi.org/simple" }
+source = { git = "https://github.com/patrickab/synto.git?rev=fix%2Flatex-in-article-bodies#56837f887d6f1443b9b187f657ab66c5428e5d55" }
 dependencies = [
     { name = "click" },
     { name = "httpx" },
@@ -5010,10 +5010,6 @@ dependencies = [
     { name = "rich" },
     { name = "tomli-w" },
     { name = "watchdog" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/2d/a6/f19aca5a917c39b6cc5332f604a3ef6093be8bf666f453d0c2d9c48691f1/synto-0.7.0.tar.gz", hash = "sha256:d34f44a6e4d7826af5c6ae8d387694c218b928374f93d4b92164d61cb5162a9e", size = 1055677, upload-time = "2026-07-20T19:48:33.318Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/4a/e9/41c6b61338d98820780a43ed075cd77525674c38242110435330771d771b/synto-0.7.0-py3-none-any.whl", hash = "sha256:4bc8dcf14b53f45fac32ce737ecf878f1a46d6d0b010c7decbe6c3b7b10afa77", size = 340717, upload-time = "2026-07-20T19:48:31.851Z" },
 ]
 
 [[package]]

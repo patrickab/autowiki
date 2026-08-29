@@ -1,22 +1,24 @@
-sample_pdf: adl4p-exercise-07-GNNs.pdf
-pdf_kind: exercise            # exercise | paper | lecture -> selects preprocessing prompt
+# Full path to the sample PDF: absolute, ~-expanded (e.g. a cloud mount), or
+# repo-relative. The shared MinerU cloud cache is keyed on the file's stem.
+sample_pdf: ~/Nextcloud/linux/Documents/PDFs/adl4p-slides-03a-differentiable-physics.pdf
+pdf_kind: lecture             # slides -> lecture prompt
 
-# Each model is stamped into BOTH config surfaces (preprocessing + synto.toml).
-# Provider keys are read from the environment (e.g. DEEPSEEK_API_KEY) by the
-# underlying clients; ollama needs none.
+# Test run: three fast/"flash" models via OpenRouter. Needs OPENROUTER_API_KEY.
+# NOTE: verify each `model` slug on https://openrouter.ai/models -- best-effort guesses.
+# reasoning omitted (flash models are cheap/fast; add `reasoning: low` to steer).
 models:
-  - id: ollama-deepseek
-    provider: ollama
-    model: deepseek-v4-pro:cloud
-    url: http://localhost:11434
-  # - id: deepseek-chat
-  #   provider: deepseek
-  #   model: deepseek-chat
-  #   url: https://api.deepseek.com
-  # - id: or-claude
-  #   provider: openrouter
-  #   model: anthropic/claude-3.5-sonnet
-  #   url: https://openrouter.ai/api/v1
+  - id: deepseek-l4-flash
+    provider: openrouter
+    model: deepseek/deepseek-l4-flash
+    url: https://openrouter.ai/api/v1
+  - id: glm-5.3-flash
+    provider: openrouter
+    model: z-ai/glm-5.3-flash
+    url: https://openrouter.ai/api/v1
+  - id: gpt-5.6-luna
+    provider: openrouter
+    model: openai/gpt-5.6-luna
+    url: https://openrouter.ai/api/v1
 
 judge:
-  model: ollama/deepseek-v4-pro:cloud
+  model: openrouter/openai/gpt-5.6-luna

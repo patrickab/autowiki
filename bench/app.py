@@ -25,10 +25,28 @@ def load_results(path: Path) -> dict:
     return data if isinstance(data, dict) else {}
 
 
+def _green(v) -> str:
+    """0-5 score -> green background, without matplotlib (background_gradient needs it)."""
+    try:
+        x = max(0.0, min(1.0, float(v) / 5))
+    except (TypeError, ValueError):
+        return ""
+    r, g, b = int(235 - 150 * x), int(245 - 70 * x), int(235 - 150 * x)
+    return f"background-color: rgb({r},{g},{b})"
+
+
 def to_frame(results: dict) -> pd.DataFrame:
     rows = []
     for mid, r in results.items():
-        row = {"model": mid, "overall": r.get("overall", 0.0), **r.get("scores", {})}
+        u = r.get("usage", {})
+        row = {
+            "model": mid,
+            "overall": r.get("overall", 0.0),
+            **r.get("scores", {}),
+            "reasoning_tok": u.get("reasoning_tokens", 0),
+            "cost_usd": u.get("cost_usd", 0.0),
+            "wall_s": u.get("wall_clock_s", 0.0),
+        }
         rows.append(row)
     frame = pd.DataFrame(rows).set_index("model")
     return frame.sort_values("overall", ascending=False)
@@ -45,14 +63,21 @@ if not results:
     st.stop()
 
 frame = to_frame(results)
-criteria = [c for c in frame.columns if c != "overall"]
+USAGE_COLS = {"reasoning_tok", "cost_usd", "wall_s"}
+criteria = [c for c in frame.columns if c != "overall" and c not in USAGE_COLS]
 
 st.subheader("Leaderboard")
+# Grade only the 0-5 quality columns; usage columns (tokens/cost/time) are raw counts.
+quality_cols = ["overall", *criteria]
 st.dataframe(
-    frame.style.background_gradient(cmap="Greens", vmin=0, vmax=5),
+    frame.style.map(_green, subset=quality_cols),
     use_container_width=True,
 )
-st.bar_chart(frame["overall"])
+c1, c2 = st.columns(2)
+c1.caption("quality (overall)")
+c1.bar_chart(frame["overall"])
+c2.caption("reasoning tokens (preprocessing) — the thinking tax")
+c2.bar_chart(frame["reasoning_tok"])
 
 st.subheader("Per-model detail")
 for mid in frame.index:
@@ -64,6 +89,13 @@ for mid in frame.index:
             cols = st.columns(len(scores))
             for col, crit in zip(cols, criteria, strict=False):
                 col.metric(crit, scores.get(crit, "—"))
+        u = r.get("usage", {})
+        if u:
+            uc = st.columns(4)
+            uc[0].metric("reasoning tok", u.get("reasoning_tokens", 0))
+            uc[1].metric("completion tok", u.get("completion_tokens", 0))
+            uc[2].metric("cost $", f"{u.get('cost_usd', 0):.4f}")
+            uc[3].metric("wall s", u.get("wall_clock_s", 0))
         wiki_dir = BENCH / "runs" / mid / "vault" / "wiki"
         articles = sorted(wiki_dir.glob("**/*.md")) if wiki_dir.is_dir() else []
         if articles:

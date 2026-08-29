@@ -7,6 +7,9 @@ done/*
 inbox/*
 obsidian/*
 tmp/*
+bench/_warmup/
+bench/runs/
+bench/results.json
 
 !**/.gitkeep
 !obsidian/synto.toml
