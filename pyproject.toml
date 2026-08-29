@@ -4,12 +4,12 @@ version = "0.1.0"
 requires-python = ">=3.12"
 dependencies = [
     "llm-baseclient @ git+https://github.com/patrickab/llm-baseclient.git@main",
-    "synto>=0.4.0",
+    "synto>=0.7.0",
     "mineru[all]",
     "pyyaml",
     "watchdog",
     "torch>=2.13.0",
-    "torchvision>=0.27.0",
+    "torchvision>=0.28.0",
 ]
 
 [build-system]
