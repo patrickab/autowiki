@@ -1,15 +1,28 @@
 # Full path to the sample PDF: absolute, ~-expanded (e.g. a cloud mount), or
 # repo-relative. The shared MinerU cloud cache is keyed on the file's stem.
+# slug becomes the readable part of YY_MM_DD_<slug>_<commit> bundle names.
+slug: latex-transport
 sample_pdf: ~/Nextcloud/linux/Documents/PDFs/adl4p-slides-03a-differentiable-physics.pdf
 pdf_kind: lecture             # slides -> lecture prompt
 
-# Test run: three fast/"flash" models via OpenRouter. Needs OPENROUTER_API_KEY.
-# NOTE: verify each `model` slug on https://openrouter.ai/models -- best-effort guesses.
-# reasoning omitted (flash models are cheap/fast; add `reasoning: low` to steer).
+# content_cap: how long generated articles/drafts should be (Synto content caps).
+# max_tokens: hard API ceiling for every LLM call (preprocessing + Synto num_predict).
+# It's a ceiling, not a target -- set generous so mandatory-reasoning models have room
+# to think AND answer without truncating. Well-behaved models won't approach it.
+content_cap: 8192
+max_tokens: 32768
+
+# max_articles: hard ceiling on articles per source (Synto max_concepts_per_source).
+# Authoritative -- it beats Synto's per-type built-ins (textbook 25, paper 15), so it
+# holds whatever source_type preprocessing stamps on the note.
+max_articles: 8
+
+# LaTeX-transport trial: two flash models via OpenRouter. Needs OPENROUTER_API_KEY.
+# No `reasoning` field -- flash models reject reasoning_effort.
 models:
-  - id: deepseek-l4-flash
+  - id: deepseek-v4-flash
     provider: openrouter
-    model: deepseek/deepseek-l4-flash
+    model: deepseek/deepseek-v4-flash
     url: https://openrouter.ai/api/v1
   - id: glm-5.3-flash
     provider: openrouter
@@ -21,4 +34,4 @@ models:
     url: https://openrouter.ai/api/v1
 
 judge:
-  model: openrouter/openai/gpt-5.6-luna
+  model: openrouter/openai/gpt-5.6-terra

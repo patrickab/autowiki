@@ -13,10 +13,15 @@ wiki against the MinerU ground truth.
 from __future__ import annotations
 
 import asyncio
+from dataclasses import dataclass
+from datetime import datetime
+from enum import StrEnum
 import json
 import logging
 from pathlib import Path
+import re
 import shutil
+import subprocess
 import sys
 import time
 
@@ -31,47 +36,120 @@ from autowiki.synto_runner import run_synto
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("bench")
 
-# Preprocessing + judge run litellm in-process, so a success callback captures their
-# token usage (incl. reasoning tokens) and cost. Synto runs as a subprocess with its
-# own non-litellm client, so its tokens are NOT captured here -- only wall-clock is.
-_usage: list[dict] = []
+
+@dataclass(frozen=True)
+class UsageRecord:
+    """Token counts and cost reported for one in-process LLM call."""
+
+    prompt_tokens: int
+    completion_tokens: int
+    reasoning_tokens: int
+    cost_usd: float
 
 
-def _usage_cb(kwargs, response_obj, start_time, end_time) -> None:
-    try:
-        u = response_obj.usage
-        details = getattr(u, "completion_tokens_details", None)
-        _usage.append({
-            "model": kwargs.get("model"),
-            "prompt_tokens": u.prompt_tokens,
-            "completion_tokens": u.completion_tokens,
-            "reasoning_tokens": getattr(details, "reasoning_tokens", None) or 0,
-            "cost_usd": kwargs.get("response_cost") or 0.0,
-        })
-    except Exception:
-        pass  # ponytail: usage is best-effort telemetry; never fail a run over it
+# LiteLLM's callback has no run-local destination, so sequential model runs share
+# this list. Each run remembers its starting index and summarizes only newer calls.
+# Synto runs in a subprocess and therefore contributes wall-clock time, but no usage.
+_usage_records: list[UsageRecord] = []
 
 
-litellm.success_callback = [_usage_cb]
+def _record_usage(kwargs, response_obj, _start_time, _end_time) -> None:
+    """Capture best-effort telemetry from a successful LiteLLM call.
+
+    - Keep the unused time arguments required by LiteLLM's callback contract.
+    - Ignore missing telemetry rather than failing an otherwise successful run.
+    """
+    usage = getattr(response_obj, "usage", None)
+    if usage is None:
+        return
+
+    completion_details = getattr(usage, "completion_tokens_details", None)
+    _usage_records.append(
+        UsageRecord(
+            prompt_tokens=getattr(usage, "prompt_tokens", 0) or 0,
+            completion_tokens=getattr(usage, "completion_tokens", 0) or 0,
+            reasoning_tokens=getattr(completion_details, "reasoning_tokens", 0) or 0,
+            cost_usd=kwargs.get("response_cost") or 0.0,
+        )
+    )
 
 
-def _drain_usage(start_idx: int) -> dict:
-    """Sum usage records appended since start_idx (this model's preprocessing calls)."""
-    rows = _usage[start_idx:]
+litellm.success_callback = [_record_usage]
+
+
+def _summarize_usage(start_index: int) -> dict:
+    """Sum usage records appended since start_index (this model's preprocessing calls)."""
+    records = _usage_records[start_index:]
     return {
-        "prompt_tokens": sum(r["prompt_tokens"] for r in rows),
-        "completion_tokens": sum(r["completion_tokens"] for r in rows),
-        "reasoning_tokens": sum(r["reasoning_tokens"] for r in rows),
-        "cost_usd": round(sum(r["cost_usd"] for r in rows), 6),
+        "prompt_tokens": sum(record.prompt_tokens for record in records),
+        "completion_tokens": sum(record.completion_tokens for record in records),
+        "reasoning_tokens": sum(record.reasoning_tokens for record in records),
+        "cost_usd": round(sum(record.cost_usd for record in records), 6),
     }
+
 
 BENCH = Path(__file__).parent.resolve()
 ROOT = BENCH.parent
-# ponytail: absolute rubric scoring is O(n) judge calls. Upgrade path for a
-# tie-breaking ranking is pairwise round-robin (O(n^2), needs position-bias
-# randomisation) -- not built until the matrix is large enough to need it.
-CRITERIA = ["faithfulness", "coverage", "structure", "linking", "conciseness"]
-KIND_DIR = {"exercise": "exercises", "paper": "papers", "lecture": "lectures"}
+SPEC = BENCH / "spec.yaml"
+BENCHMARKS = BENCH / "benchmarks"
+
+
+class DocumentType(StrEnum):
+    """Document types accepted by ``pdf_kind`` in the benchmark spec."""
+
+    EXERCISE = "exercise"
+    PAPER = "paper"
+    LECTURE = "lecture"
+
+
+@dataclass(frozen=True)
+class Criterion:
+    """One named scoring dimension and its judge guidance."""
+
+    name: str
+    description: str
+
+
+CRITERIA = (
+    Criterion(
+        name="faithfulness",
+        description="Claims are supported by the source without hallucination.",
+    ),
+    Criterion(
+        name="coverage",
+        description="Important source concepts and conclusions are retained.",
+    ),
+    Criterion(
+        name="structure",
+        description="Content is organized into coherent, focused articles.",
+    ),
+    Criterion(
+        name="didactic_quality",
+        description="Concepts are explained in a logical progression that a first-time reader can follow.",
+    ),
+    Criterion(
+        name="linking",
+        description="Related concepts are connected with useful wiki links.",
+    ),
+    Criterion(
+        name="conciseness",
+        description="Content avoids repetition and unnecessary detail.",
+    ),
+)
+
+
+@dataclass(frozen=True)
+class BenchmarkConfig:
+    base: dict
+    sample: Path
+    models: list[dict]
+    judge_model: str
+    document_type: DocumentType
+    slug: str
+    content_cap: int
+    max_tokens: int
+    max_articles: int
+
 
 SYNTO_TEMPLATE = """\
 [providers.default]
@@ -86,64 +164,72 @@ ctx = 500000
 
 [models.fast.options]
 num_predict = {num_predict}
-{fast_reasoning}
+{reasoning_option}
+
 [models.heavy]
 provider = "default"
 model = "{model}"
 ctx = 500000
-{heavy_options}
+
+[models.heavy.options]
+num_predict = {num_predict}
+{reasoning_option}
+
 [pipeline]
 auto_approve = true
 auto_commit = false
 auto_maintain = false
-max_concepts_per_source = 8
+max_concepts_per_source = {max_articles}
 article_max_tokens = {content_cap}
 concept_draft_soft_cap = {content_cap}
 inline_source_citations = true
 graph_quality_checks = true
 """
 
-# ponytail: template assumes one provider serving both fast+heavy. If a model
-# needs a split provider or per-provider API-key fields, extend the schema here.
 
+def render_synto_toml(model: dict, num_predict: int, content_cap: int, max_articles: int) -> str:
+    """Render the Synto configuration for one benchmark model.
 
-def render_synto_toml(m: dict, num_predict: int, content_cap: int) -> str:
-    # num_predict = API ceiling (content + reasoning headroom); content_cap = how long
-    # articles/drafts should be. OpenRouter's `reasoning` knob is merged into the payload.
-    effort = m.get("reasoning")
-    line = f'reasoning = {{ effort = "{effort}" }}\n' if effort else ""
-    # heavy always needs an options table so mandatory-reasoning models get room for content.
-    heavy = f"\n[models.heavy.options]\nnum_predict = {num_predict}\n{line}"
+    - Use the same provider and model for the fast and heavy roles.
+    - Apply the API ceiling, content cap, article ceiling, and optional reasoning effort.
+
+    max_concepts_per_source is a hard ceiling in Synto: it beats the per-type
+    built-ins (textbook 25, paper 15), so the spec decides the article count no
+    matter what source_type preprocessing stamps on the note.
+    """
+    effort = model.get("reasoning")
+    reasoning_option = f'reasoning = {{ effort = "{effort}" }}' if effort else ""
     return SYNTO_TEMPLATE.format(
-        provider=m["provider"],
-        url=m["url"],
-        model=m["model"],
+        provider=model["provider"],
+        url=model["url"],
+        model=model["model"],
         num_predict=num_predict,
+        reasoning_option=reasoning_option,
         content_cap=content_cap,
-        fast_reasoning=line,
-        heavy_options=heavy,
+        max_articles=max_articles,
     )
 
 
-def build_preproc_config(base: dict, vault: Path, m: dict, max_output_tokens: int) -> dict:
-    cfg = {**base, "preprocessing": {**base["preprocessing"]}}
-    cfg["vault_path"] = str(vault)
-    cfg["preprocessing"]["model"] = f"{m['provider']}/{m['model']}"  # llm-baseclient routing
-    cfg["preprocessing"]["max_output_tokens"] = max_output_tokens  # room for mandatory reasoning + content
+def build_model_preprocessing_config(base_config: dict, vault: Path, model: dict, max_output_tokens: int) -> dict:
+    """Create a model-specific preprocessing config targeting an isolated vault."""
+    config = {**base_config, "preprocessing": {**base_config["preprocessing"]}}
+    config["vault_path"] = str(vault)
+    config["preprocessing"]["model"] = f"{model['provider']}/{model['model']}"  # llm-baseclient routing
+    config["preprocessing"]["max_output_tokens"] = max_output_tokens  # room for mandatory reasoning + content
     # Per-model `reasoning` is authoritative: drop the base default so non-reasoning
     # ("flash") models don't get reasoning_effort, which OpenRouter rejects for them.
-    cfg["preprocessing"].pop("reasoning_effort", None)
-    if m.get("reasoning"):
-        cfg["preprocessing"]["reasoning_effort"] = m["reasoning"]  # steer preprocessing thinking
-    return cfg
+    config["preprocessing"].pop("reasoning_effort", None)
+    if model.get("reasoning"):
+        config["preprocessing"]["reasoning_effort"] = model["reasoning"]  # steer preprocessing thinking
+    return config
 
 
 async def ensure_mineru(sample: Path, stem: str, base: dict) -> str:
-    """Guard: make sure the sample's MinerU markdown is in the shared cache before
-    the matrix runs, parsing once if absent. Reuses the pipeline's own extract+
-    publish step (no new MinerU wrapper) and returns the raw md as judge truth.
-    ponytail: cloud_cache is best-effort; if the share is unmounted, publish is a
-    no-op and each model falls back to parsing locally (pipeline's documented mode)."""
+    """Provide the source Markdown used as judge ground truth.
+
+    - Return the shared MinerU cache entry when available.
+    - Otherwise extract once into ``bench/_warmup`` and publish best-effort.
+    """
     cached = cloud_cache.fetch_cached_markdown(stem)
     if cached is not None:
         log.info("[%s] MinerU already in shared cache", stem)
@@ -166,10 +252,18 @@ def collect_wiki(vault: Path) -> str:
 
 
 def judge(judge_model: str, source: str, wiki: str) -> dict:
+    """Score one generated wiki against its source.
+
+    - Ask the judge for criterion scores, an overall score, and a note.
+    - Strip an optional Markdown fence and return the parsed JSON object.
+    """
+    rubric = "\n".join(f"- {criterion.name}: {criterion.description}" for criterion in CRITERIA)
+    score_keys = ", ".join(f'"{criterion.name}"' for criterion in CRITERIA)
     system = (
         "You are a strict evaluator. Score a generated wiki against its SOURCE only. "
         "Do not reward fluent content that is unsupported by the source. "
-        f"Rate each criterion 1-5: {', '.join(CRITERIA)}. "
+        f"Rate each criterion 1-5:\n{rubric}\n"
+        f"Use exactly these score keys: {score_keys}. "
         'Reply with ONLY JSON: {"scores": {crit: int}, "overall": float, "note": str}.'
     )
     user = f"# SOURCE (ground truth)\n{source}\n\n# GENERATED WIKI\n{wiki or '(empty)'}"
@@ -181,12 +275,12 @@ def judge(judge_model: str, source: str, wiki: str) -> dict:
 
 
 def preflight(models: list[dict], judge_model: str) -> None:
-    """Fail fast: one 'hello' per model (+judge) so bad slugs, missing auth, or
-    unsupported reasoning error out in seconds instead of mid-run. Uses the same
-    client + reasoning as the real preprocessing call. ponytail: llm-baseclient
-    returns an Exception instead of raising, so we poke .choices to detect it; the
-    real cause is printed by its own logger just above the SystemExit."""
-    targets = [(m["id"], f"{m['provider']}/{m['model']}", m.get("reasoning")) for m in models]
+    """Check every benchmark model and the judge before expensive work.
+
+    - Send one tiny request with each model's configured reasoning effort.
+    - Stop immediately on invalid credentials, model names, or options.
+    """
+    targets = [(model["id"], f"{model['provider']}/{model['model']}", model.get("reasoning")) for model in models]
     targets.append(("judge", judge_model, None))
     for name, model, reasoning in targets:
         kwargs: dict = {"max_tokens": 8}
@@ -200,10 +294,31 @@ def preflight(models: list[dict], judge_model: str) -> None:
         log.info("[preflight] %s OK", name)
 
 
+def benchmark_bundle_path(slug: str, commit: str) -> Path:
+    """Build the dated, human-readable directory for one benchmark bundle."""
+    date = datetime.now().strftime("%y_%m_%d")
+    return BENCHMARKS / f"{date}_{slug}_{commit}"
+
+
+def current_commit() -> str:
+    """Return the short commit hash recorded in benchmark bundle names."""
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            cwd=ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except (FileNotFoundError, subprocess.CalledProcessError) as error:
+        raise SystemExit(f"Cannot determine benchmark commit: {error}")
+    return result.stdout.strip()
+
+
 def selfcheck() -> None:
-    m = {"provider": "openrouter", "url": "https://x", "model": "anthropic/claude-sonnet-5", "reasoning": "high"}
-    parsed = tomllib.loads(render_synto_toml(m, 32768, 8192))
-    assert parsed["models"]["fast"]["model"] == m["model"], "synto model not stamped"
+    model = {"provider": "openrouter", "url": "https://x", "model": "anthropic/claude-sonnet-5", "reasoning": "high"}
+    parsed = tomllib.loads(render_synto_toml(model, 32768, 8192, 8))
+    assert parsed["models"]["fast"]["model"] == model["model"], "synto model not stamped"
     assert parsed["providers"]["default"]["name"] == "openrouter", "provider not stamped"
     assert parsed["models"]["fast"]["options"]["reasoning"] == {"effort": "high"}, "synto reasoning not steered"
     assert parsed["models"]["heavy"]["options"]["reasoning"] == {"effort": "high"}, "heavy reasoning not steered"
@@ -212,26 +327,39 @@ def selfcheck() -> None:
     assert parsed["models"]["heavy"]["options"]["num_predict"] == 32768, "max_tokens not applied to heavy"
     assert parsed["pipeline"]["article_max_tokens"] == 8192, "content_cap not applied to article cap"
     assert parsed["pipeline"]["concept_draft_soft_cap"] == 8192, "content_cap not applied to draft cap"
-    no_reasoning = tomllib.loads(render_synto_toml({**m, "reasoning": None}, 16384, 8192))
+    # A hard ceiling: Synto must not lift this to the textbook built-in of 25.
+    assert parsed["pipeline"]["max_concepts_per_source"] == 8, "max_articles not applied to article cap"
+    no_reasoning = tomllib.loads(render_synto_toml({**model, "reasoning": None}, 16384, 8192, 12))
+    assert no_reasoning["pipeline"]["max_concepts_per_source"] == 12, "max_articles not configurable"
     assert "reasoning" not in no_reasoning["models"]["heavy"]["options"], "reasoning should be omittable"
-    cfg = build_preproc_config({"preprocessing": {"reasoning_effort": "low"}}, Path("/v"), m, 32768)
-    assert cfg["vault_path"] == "/v", "vault_path not isolated"
-    assert cfg["preprocessing"]["model"] == "openrouter/anthropic/claude-sonnet-5", "preproc model wrong"
-    assert cfg["preprocessing"]["reasoning_effort"] == "high", "preproc reasoning not steered"
-    assert cfg["preprocessing"]["max_output_tokens"] == 32768, "budget not applied to preprocessing"
+    config = build_model_preprocessing_config({"preprocessing": {"reasoning_effort": "low"}}, Path("/v"), model, 32768)
+    assert config["vault_path"] == "/v", "vault_path not isolated"
+    assert config["preprocessing"]["model"] == "openrouter/anthropic/claude-sonnet-5", "preproc model wrong"
+    assert config["preprocessing"]["reasoning_effort"] == "high", "preproc reasoning not steered"
+    assert config["preprocessing"]["max_output_tokens"] == 32768, "budget not applied to preprocessing"
     # A flash model (no `reasoning`) must NOT inherit the base reasoning_effort.
-    flash = build_preproc_config({"preprocessing": {"reasoning_effort": "high"}}, Path("/v"), {**m, "reasoning": None}, 16384)
+    flash = build_model_preprocessing_config(
+        {"preprocessing": {"reasoning_effort": "high"}}, Path("/v"), {**model, "reasoning": None}, 16384
+    )
     assert "reasoning_effort" not in flash["preprocessing"], "flash model leaked reasoning_effort"
+    assert f"{DocumentType.LECTURE}s" == "lectures", "document type directory wrong"
+    criterion_names = [criterion.name for criterion in CRITERIA]
+    assert len(criterion_names) == len(set(criterion_names)), "criterion names must be unique"
+    assert all(criterion.description for criterion in CRITERIA), "criterion descriptions must not be empty"
+    assert benchmark_bundle_path("latex-transport", "abc1234").name.endswith("_latex-transport_abc1234")
     print("selfcheck OK")
 
 
-def main() -> None:
-    if "--selfcheck" in sys.argv:
-        selfcheck()
-        return
+def load_benchmark_config() -> BenchmarkConfig:
+    """Load the benchmark inputs into one immutable configuration.
 
-    spec = yaml.safe_load((BENCH / "spec.yaml").read_text(encoding="utf-8"))
+    - Read the benchmark spec and base preprocessing configuration.
+    - Resolve and validate the sample PDF and model list.
+    - Apply token defaults and parse the configured document type.
+    """
+    spec = yaml.safe_load(SPEC.read_text(encoding="utf-8"))
     base = yaml.safe_load((ROOT / "config-preprocessing.yaml").read_text(encoding="utf-8"))
+
     # Full path (absolute or ~-expanded, e.g. a cloud mount); relative falls back to repo root.
     sample = Path(spec["sample_pdf"]).expanduser()
     if not sample.is_absolute():
@@ -241,52 +369,133 @@ def main() -> None:
     models = spec.get("models") or []
     if not models:
         raise SystemExit("spec.yaml lists no models")
-    stem = sample.stem
-    kind_dir = KIND_DIR[spec.get("pdf_kind", "exercise")]
+    slug = spec.get("slug", "")
+    if not isinstance(slug, str) or not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", slug):
+        raise SystemExit("spec.yaml slug must contain lowercase letters, numbers, and single hyphens")
+
     # content_cap: how long articles/drafts should be. max_tokens: API ceiling that
     # must also fit a reasoning model's thinking. Override both in spec.yaml.
-    content_cap = spec.get("content_cap", 8192)
-    max_tokens = spec.get("max_tokens", 32768)
+    return BenchmarkConfig(
+        base=base,
+        sample=sample,
+        models=models,
+        judge_model=spec["judge"]["model"],
+        document_type=DocumentType(spec.get("pdf_kind", DocumentType.EXERCISE)),
+        slug=slug,
+        content_cap=spec.get("content_cap", 8192),
+        max_tokens=spec.get("max_tokens", 32768),
+        max_articles=spec.get("max_articles", 8),
+    )
 
-    preflight(models, spec["judge"]["model"])  # cheap auth/slug/reasoning check before expensive work
 
-    # Guard: prime the shared cache (parse once if absent) before the matrix runs.
-    source = asyncio.run(ensure_mineru(sample, stem, base))
+def prepare_model_run(benchmark_dir: Path, config: BenchmarkConfig, model: dict) -> tuple[Path, Path]:
+    """Create the isolated inputs for one model run.
 
+    - Write the model-specific Synto configuration into its vault.
+    - Copy the sample because preprocessing consumes its PDF input.
+    - Return the disposable PDF copy and isolated vault.
+    """
+    run_dir = benchmark_dir / "runs" / model["id"]
+    vault = run_dir / "vault"
+    vault.mkdir(parents=True, exist_ok=True)
+    (vault / "synto.toml").write_text(
+        render_synto_toml(model, config.max_tokens, config.content_cap, config.max_articles),
+        encoding="utf-8",
+    )
+
+    # preprocess_pdf consumes (moves) its PDF, so hand each model its own copy.
+    pdf_dir = run_dir / f"{config.document_type}s"
+    pdf_dir.mkdir(parents=True, exist_ok=True)
+    pdf_copy = pdf_dir / config.sample.name
+    shutil.copy2(config.sample, pdf_copy)
+    return pdf_copy, vault
+
+
+def run_model(benchmark_dir: Path, config: BenchmarkConfig, model: dict, source: str) -> dict:
+    """Run and score one model end to end.
+
+    - Prepare its files, preprocess the PDF, and invoke Synto.
+    - Judge the generated wiki and attach usage plus wall-clock telemetry.
+    - Convert processing or judging failures into a zero-score result.
+    """
+    model_id = model["id"]
+    pdf_copy, vault = prepare_model_run(benchmark_dir, config, model)
+    usage_start = len(_usage_records)
+    started_at = time.monotonic()
+
+    try:
+        # root_dir=ROOT so preprocess_pdf finds repo prompts/; vault_path is absolute.
+        model_preprocessing_config = build_model_preprocessing_config(config.base, vault, model, config.max_tokens)
+        asyncio.run(preprocess_pdf(pdf_copy, ROOT, model_preprocessing_config))
+        run_synto(vault)
+
+        # Snapshot before the judge call adds its own usage.
+        usage = _summarize_usage(usage_start)
+        result = judge(config.judge_model, source, collect_wiki(vault))
+        result["usage"] = usage
+    except Exception:
+        log.exception("[%s] failed", model_id)
+        result = {"overall": 0.0, "note": "run failed", "usage": _summarize_usage(usage_start)}
+
+    result["usage"]["wall_clock_s"] = round(time.monotonic() - started_at, 1)
+    return result
+
+
+def run_benchmark(benchmark_dir: Path, config: BenchmarkConfig, source: str) -> dict:
+    """Run the configured model matrix sequentially.
+
+    - Execute each model in its own run directory.
+    - Return results keyed by the model IDs from the spec.
+    """
     results = {}
-    for m in models:
-        mid = m["id"]
-        run = BENCH / "runs" / mid
-        vault = run / "vault"
-        vault.mkdir(parents=True, exist_ok=True)
-        (vault / "synto.toml").write_text(render_synto_toml(m, max_tokens, content_cap), encoding="utf-8")
-        # preprocess_pdf consumes (moves) its PDF, so hand each model its own copy.
-        pdf_dir = run / kind_dir
-        pdf_dir.mkdir(parents=True, exist_ok=True)
-        pdf_copy = pdf_dir / sample.name
-        shutil.copy2(sample, pdf_copy)
-        usage_start = len(_usage)
-        t0 = time.monotonic()
-        try:
-            # root_dir=ROOT so preprocess_pdf finds repo prompts/; vault_path is absolute.
-            asyncio.run(preprocess_pdf(pdf_copy, ROOT, build_preproc_config(base, vault, m, max_tokens)))
-            run_synto(vault)
-            usage = _drain_usage(usage_start)  # snapshot before the judge call adds its own
-            results[mid] = {**judge(spec["judge"]["model"], source, collect_wiki(vault)), "usage": usage}
-        except Exception:
-            log.exception("[%s] failed", mid)
-            results[mid] = {"overall": 0.0, "note": "run failed", "usage": _drain_usage(usage_start)}
-        results[mid]["usage"]["wall_clock_s"] = round(time.monotonic() - t0, 1)
+    for model in config.models:
+        results[model["id"]] = run_model(benchmark_dir, config, model, source)
+    return results
 
-    (BENCH / "results.json").write_text(json.dumps(results, indent=2), encoding="utf-8")
+
+def print_leaderboard(results: dict) -> None:
+    """Print a compact best-first result summary.
+
+    - Sort by overall score, descending.
+    - Show reasoning tokens, cost, runtime, and the judge note.
+    """
+    ranked_results = sorted(results.items(), key=lambda item: item[1].get("overall", 0), reverse=True)
+
     print("\n=== leaderboard ===")
     print(f"{'score':>5}  {'model':<20} {'rtok':>7} {'cost$':>8} {'wall_s':>7}  note")
-    for mid, r in sorted(results.items(), key=lambda kv: kv[1].get("overall", 0), reverse=True):
-        u = r.get("usage", {})
+    for model_id, result in ranked_results:
+        usage = result.get("usage", {})
         print(
-            f"{r.get('overall', 0):>5.2f}  {mid:<20} {u.get('reasoning_tokens', 0):>7} "
-            f"{u.get('cost_usd', 0):>8.4f} {u.get('wall_clock_s', 0):>7}  {r.get('note', '')}"
+            f"{result.get('overall', 0):>5.2f}  {model_id:<20} {usage.get('reasoning_tokens', 0):>7} "
+            f"{usage.get('cost_usd', 0):>8.4f} {usage.get('wall_clock_s', 0):>7}  {result.get('note', '')}"
         )
+
+
+def main() -> None:
+    """Run the benchmark command-line workflow.
+
+    - Handle the offline self-check, then load and preflight the matrix.
+    - Warm the MinerU source, run all models, and save ``results.json``.
+    - Print the final leaderboard.
+    """
+    if "--selfcheck" in sys.argv:
+        selfcheck()
+        return
+
+    config = load_benchmark_config()
+    benchmark_dir = benchmark_bundle_path(config.slug, current_commit())
+    if benchmark_dir.exists():
+        raise SystemExit(f"Benchmark bundle already exists; change the spec slug: {benchmark_dir}")
+    preflight(config.models, config.judge_model)
+
+    # Guard: prime the shared cache (parse once if absent) before the matrix runs.
+    source = asyncio.run(ensure_mineru(config.sample, config.sample.stem, config.base))
+    benchmark_dir.mkdir(parents=True)
+    shutil.copy2(SPEC, benchmark_dir / SPEC.name)
+    results = run_benchmark(benchmark_dir, config, source)
+    (benchmark_dir / "results.json").write_text(json.dumps(results, indent=2), encoding="utf-8")
+    log.info("Benchmark bundle saved to %s", benchmark_dir)
+    print_leaderboard(results)
 
 
 if __name__ == "__main__":

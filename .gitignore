@@ -8,6 +8,7 @@ inbox/*
 obsidian/*
 tmp/*
 bench/_warmup/
+bench/benchmarks/
 bench/runs/
 bench/results.json
 

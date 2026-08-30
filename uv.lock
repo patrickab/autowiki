@@ -4996,7 +4996,7 @@ wheels = [
 [[package]]
 name = "synto"
 version = "0.7.0"
-source = { git = "https://github.com/patrickab/synto.git?rev=fix%2Flatex-in-article-bodies#56837f887d6f1443b9b187f657ab66c5428e5d55" }
+source = { git = "https://github.com/patrickab/synto.git?rev=fix%2Flatex-in-article-bodies#02e88b73e8f711dcef935ebf1e4c3e6a0e20fbe5" }
 dependencies = [
     { name = "click" },
     { name = "httpx" },

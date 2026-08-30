@@ -13,6 +13,11 @@ prompts/
   paper_writing.md     source-faithful scientific-paper preprocessing
   goal_extraction.md   exercise prerequisite extraction
 
+bench/
+  bench.py             run model matrices into dated, commit-stamped bundles
+  app.py               browse stored benchmark results, specs, and wiki articles
+  spec.yaml            configuration for the next benchmark run
+
 tests/
   test_synto_runner.py standard-library smoke tests for the CLI boundary
 
@@ -30,3 +35,5 @@ obsidian/vault-schema.md   final wiki article conventions
 - `obsidian/wiki/` contains Synto output.
 - `obsidian/done/` contains local caches and archived PDFs.
 - `obsidian/images/` contains extracted or cache-restored images.
+- `bench/benchmarks/` contains isolated benchmark bundles with their copied spec,
+  results, and per-model vaults.

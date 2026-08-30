@@ -2,9 +2,8 @@
 
     uv run streamlit run bench/app.py
 
-Reads bench/results.json (produced by bench.py): per model an `overall` score,
-per-criterion `scores`, and a concise `note`. Also surfaces each model's
-generated wiki from bench/runs/<id>/vault/wiki for spot-checking.
+Selects a complete bundle under bench/benchmarks/, shows its stored spec, and
+loads its per-model scores, usage, and generated wiki articles.
 """
 
 from __future__ import annotations
@@ -16,6 +15,17 @@ import pandas as pd
 import streamlit as st
 
 BENCH = Path(__file__).parent.resolve()
+BENCHMARKS = BENCH / "benchmarks"
+
+
+def list_benchmarks() -> list[Path]:
+    """List complete benchmark bundles, newest first."""
+    if not BENCHMARKS.is_dir():
+        return []
+    return sorted(
+        (path for path in BENCHMARKS.iterdir() if (path / "spec.yaml").is_file() and (path / "results.json").is_file()),
+        reverse=True,
+    )
 
 
 def load_results(path: Path) -> dict:
@@ -55,11 +65,19 @@ def to_frame(results: dict) -> pd.DataFrame:
 st.set_page_config(page_title="autowiki benchmark", layout="wide")
 st.title("autowiki benchmark")
 
-results_path = Path(st.sidebar.text_input("results.json", value=str(BENCH / "results.json")))
-results = load_results(results_path)
+benchmarks = list_benchmarks()
+if not benchmarks:
+    st.info(f"No complete benchmarks under {BENCHMARKS}. Run `uv run python bench/bench.py` first.")
+    st.stop()
 
+with st.sidebar:
+    selected_benchmark = st.selectbox("Benchmark", benchmarks, format_func=lambda path: path.name)
+    with st.expander("Experiment configuration"):
+        st.code((selected_benchmark / "spec.yaml").read_text(encoding="utf-8"), language="yaml")
+
+results = load_results(selected_benchmark / "results.json")
 if not results:
-    st.info(f"No results at {results_path}. Run `uv run python bench.py` first.")
+    st.info(f"No results in {selected_benchmark}.")
     st.stop()
 
 frame = to_frame(results)
@@ -71,7 +89,7 @@ st.subheader("Leaderboard")
 quality_cols = ["overall", *criteria]
 st.dataframe(
     frame.style.map(_green, subset=quality_cols),
-    use_container_width=True,
+    width="stretch",
 )
 c1, c2 = st.columns(2)
 c1.caption("quality (overall)")
@@ -96,7 +114,7 @@ for mid in frame.index:
             uc[1].metric("completion tok", u.get("completion_tokens", 0))
             uc[2].metric("cost $", f"{u.get('cost_usd', 0):.4f}")
             uc[3].metric("wall s", u.get("wall_clock_s", 0))
-        wiki_dir = BENCH / "runs" / mid / "vault" / "wiki"
+        wiki_dir = selected_benchmark / "runs" / mid / "vault" / "wiki"
         articles = sorted(wiki_dir.glob("**/*.md")) if wiki_dir.is_dir() else []
         if articles:
             chosen = st.selectbox("generated article", articles, format_func=lambda p: p.name, key=f"sel-{mid}")
