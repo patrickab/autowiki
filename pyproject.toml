@@ -7,7 +7,7 @@ dependencies = [
     "synto @ git+https://github.com/patrickab/synto.git@fix/latex-in-article-bodies",
     "mineru[all]",
     "pyyaml",
-    "torch>=2.6,<2.12",
+    "torch>=2.13.0,<2.14",
     "torchvision>=0.21,<0.27",
 ]
 
